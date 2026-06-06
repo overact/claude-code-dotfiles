@@ -4,10 +4,11 @@
 No network, no subscription service. Pops a *native* desktop notification on the
 current machine. Auto-detects the platform:
 
-  - WSL2   -> Windows toast via powershell.exe
-  - macOS  -> `osascript -e 'display notification ...'`
-  - Linux  -> `notify-send` (libnotify)
-  - else   -> silently no-op
+  - WSL2          -> Windows toast via powershell.exe
+  - native Windows-> Windows toast via powershell / pwsh
+  - macOS         -> `osascript -e 'display notification ...'`
+  - Linux         -> `notify-send` (libnotify)
+  - else          -> silently no-op
 
 Wire it on both the `Notification` and `Stop` events (see settings.json):
 
@@ -77,13 +78,14 @@ def _is_wsl() -> bool:
 
 
 def _powershell() -> str | None:
-    return shutil.which("powershell.exe") or (
-        "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe"
-        if os.path.exists(
-            "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe"
-        )
-        else None
-    )
+    # Works for both WSL (powershell.exe on PATH or under /mnt/c) and native
+    # Windows (powershell / pwsh on PATH).
+    for name in ("powershell.exe", "powershell", "pwsh"):
+        found = shutil.which(name)
+        if found:
+            return found
+    fallback = "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe"
+    return fallback if os.path.exists(fallback) else None
 
 
 # Build the toast XML in PowerShell; pass text via env vars so there is zero
@@ -107,7 +109,8 @@ _PS = (
 )
 
 
-def _notify_wsl(title: str, body: str, urgent: bool) -> bool:
+def _notify_powershell(title: str, body: str, urgent: bool) -> bool:
+    """Windows toast via PowerShell — used on both WSL2 and native Windows."""
     pwsh = _powershell()
     if not pwsh:
         return False
@@ -159,11 +162,12 @@ def _notify_linux(title: str, body: str, urgent: bool) -> bool:
 
 
 def _dispatch(title: str, body: str, urgent: bool) -> bool:
-    if _is_wsl():
-        return _notify_wsl(title, body, urgent)
-    if platform.system() == "Darwin":
+    system = platform.system()
+    if system == "Windows" or _is_wsl():
+        return _notify_powershell(title, body, urgent)
+    if system == "Darwin":
         return _notify_macos(title, body, urgent)
-    if platform.system() == "Linux":
+    if system == "Linux":
         return _notify_linux(title, body, urgent)
     return False
 

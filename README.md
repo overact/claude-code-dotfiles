@@ -16,7 +16,7 @@ gitignored.
 | `statusline/statusline.py` | status line | `user@host:cwd (branch✓) │ model │ 🧠effort │ ctx% │ 5h quota │ 7d quota`. Quota pulled from the local OAuth credential and cached 180 s. |
 | `hooks/project_session_start.py` | `SessionStart` | Auto-detects the git root and injects "read these first" files (`AGENTS.md`, `CLAUDE.md`, `docs/…`), open `TODO.md` items, and the latest handoff note. Per-project tweaks via `project-overrides.json`. |
 | `hooks/handoff_reminder.py` | `Stop` | Reminds you to write a handoff note when a session gets long (≥4 MB transcript or ≥50 user turns). |
-| `hooks/notify_local.py` | `Notification` + `Stop` | Native desktop notification — **WSL2 toast / macOS / Linux**, auto-detected. Fires on "needs your input", and on turn-end only if the turn ran ≥`CC_BUSY_THRESHOLD_S` (60 s). |
+| `hooks/notify_local.py` | `Notification` + `Stop` | Native desktop notification — **WSL2 / native Windows / macOS / Linux**, auto-detected. Fires on "needs your input", and on turn-end only if the turn ran ≥`CC_BUSY_THRESHOLD_S` (60 s). |
 | `settings.json` | user settings | Template wiring all of the above with `$HOME`-relative paths. **No secrets.** |
 | `examples/project-hooks/` | per-project | Templates for repo-scoped hooks (config validation, regression tests). Not synced as user config — see that folder's README. |
 
@@ -89,10 +89,12 @@ the git root, advertises any of `AGENTS.md` / `CLAUDE.md` / `changes.md` /
 
 ## Requirements
 
-- `python3` on `PATH` (hooks + status line are stdlib-only).
-- Desktop notifications need: WSL2 → `powershell.exe`; macOS → `osascript`;
-  Linux → `notify-send` (`libnotify`). Missing tool → notifications no-op
-  silently, nothing else breaks.
+- `python3` on `PATH` (hooks + status line are stdlib-only). On native Windows
+  the interpreter is usually `python` — change `python3` to `python` in the
+  hook/statusLine commands in your `settings.json`.
+- Desktop notifications need: WSL2/native Windows → `powershell` (or `pwsh`);
+  macOS → `osascript`; Linux → `notify-send` (`libnotify`). Missing tool →
+  notifications no-op silently, nothing else breaks.
 
 ## License
 
