@@ -69,7 +69,7 @@ else
   echo "  keep   $HOOKS_DIR/project-overrides.json (already present)"
 fi
 
-# 4. settings.json — never silently overwrite (may contain secrets)
+# 4. settings.json — merge hooks/statusLine into existing settings, preserving user keys
 SETTINGS="$CLAUDE_DIR/settings.json"
 if [ ! -e "$SETTINGS" ]; then
   cp "$REPO_DIR/settings.json" "$SETTINGS"
@@ -78,10 +78,15 @@ elif [ "$FORCE_SETTINGS" = "1" ]; then
   backup "$SETTINGS"
   cp "$REPO_DIR/settings.json" "$SETTINGS"
   echo "  force  $SETTINGS (old one backed up)"
+elif command -v jq &>/dev/null; then
+  backup "$SETTINGS"
+  # Deep-merge: existing settings win for scalar keys; template wins for hooks/statusLine
+  jq -s '.[0] * .[1]' "$SETTINGS" "$REPO_DIR/settings.json" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+  echo "  merge  $SETTINGS (hooks + statusLine merged in, your keys preserved)"
 else
   cp "$REPO_DIR/settings.json" "$SETTINGS.dotfiles-new"
-  echo "  diff   $SETTINGS already exists — wrote template to $SETTINGS.dotfiles-new"
-  echo "         merge it by hand (keep your env/secrets), or re-run with --force-settings"
+  echo "  WARN   jq not found — wrote template to $SETTINGS.dotfiles-new"
+  echo "         install jq and re-run, or merge manually"
 fi
 
 [ -d "$BACKUP_DIR" ] && echo "Backups saved under $BACKUP_DIR"
