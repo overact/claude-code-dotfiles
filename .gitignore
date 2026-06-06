@@ -1,0 +1,17 @@
+# Machine-specific config — never commit
+hooks/project-overrides.json
+settings.local.json
+**/settings.local.json
+
+# Secrets / credentials (these live under ~/.claude, but guard anyway)
+.credentials.json
+*.key
+.env
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Editor / OS cruft
+.DS_Store
+*.swp

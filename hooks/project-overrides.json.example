@@ -1,0 +1,21 @@
+{
+  "__doc__": [
+    "Optional per-project overrides read by hooks/project_session_start.py.",
+    "Copy this file to ~/.claude/hooks/project-overrides.json and edit.",
+    "Keys are ABSOLUTE project-root paths (the dir containing .git).",
+    "Every field below is optional; omit what you don't need.",
+    "  note         -> one-line project identity injected at session start",
+    "  todo         -> path to a TODO.md whose '- [ ] item' lines get surfaced",
+    "  handoff_dir  -> where handoff notes live (default: <root>/docs/handoffs)",
+    "  extra_files  -> extra paths to advertise as 'read these first'",
+    "This file is gitignored on purpose: it contains machine-specific paths."
+  ],
+  "/abs/path/to/your/project": {
+    "note": "Treat this repo as an independent project; repo Markdown is source of truth.",
+    "todo": "/abs/path/to/your/project/TODO.md",
+    "handoff_dir": "/abs/path/to/your/project/docs/handoffs",
+    "extra_files": [
+      "/abs/path/to/your/project/docs/decisions/README.md"
+    ]
+  }
+}

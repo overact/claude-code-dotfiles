@@ -1,0 +1,33 @@
+{
+  "__doc__": [
+    "EXAMPLE <project>/.claude/settings.local.json showing how to wire the two",
+    "example project hooks. Put project hooks under .claude/hooks/ in your repo.",
+    "Use $CLAUDE_PROJECT_DIR — Claude Code expands it to the project root for",
+    "project-level hooks, so the file is portable across machines/checkouts.",
+    "Keep secrets and machine-specific allow-lists in settings.local.json",
+    "(gitignored); put shareable hook wiring in .claude/settings.json instead."
+  ],
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 $CLAUDE_PROJECT_DIR/.claude/hooks/validate_config.py",
+            "timeout": 30,
+            "statusMessage": "Validating config…"
+          },
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 $CLAUDE_PROJECT_DIR/.claude/hooks/run_regression_tests.py",
+            "timeout": 120,
+            "async": true,
+            "asyncRewake": true,
+            "statusMessage": "Running regression tests…"
+          }
+        ]
+      }
+    ]
+  }
+}
