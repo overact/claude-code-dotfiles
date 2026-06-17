@@ -16,22 +16,21 @@ transcript_path = data.get("transcript_path")
 user = os.getenv("USER", "")
 host = os.uname().nodename.split(".")[0] if hasattr(os, "uname") else "unknown"
 _cwd = data.get("workspace", {}).get("current_dir") or data.get("cwd") or os.getcwd()
-# Collapse $HOME to ~, then abbreviate intermediate segments to their first char
-# (fish/powerlevel10k style): keep the leading ~ or / and the final segment full,
-# so a deep path like /mnt/data/proj/my_repo renders as /m/d/p/my_repo.
+# Collapse $HOME to ~, then keep only the last two segments (parent / current
+# dir); anything above is replaced by a leading ~. So /mnt/data/proj/my_repo
+# renders as ~/proj/my_repo and ~/.config/nvim/lua as ~/nvim/lua. Paths that are
+# already two segments or fewer (and not under $HOME) keep their real /-prefix.
 _home = os.path.expanduser("~")
 _full = _cwd.replace(_home, "~", 1) if _cwd.startswith(_home) else _cwd
 
 def shorten_path(p):
-    lead = "~" if p.startswith("~") else ("/" if p.startswith("/") else "")
-    parts = [s for s in p.strip("/").lstrip("~").strip("/").split("/") if s]
-    if not parts:
-        return p
-    def abbr(s):
-        return (s[:2] if s.startswith(".") else s[:1])
-    short = [abbr(s) for s in parts[:-1]] + [parts[-1]]
-    prefix = "~/" if lead == "~" else lead   # "/" already separates; "~" needs one
-    return prefix + "/".join(short)
+    home = p.startswith("~")
+    segs = [s for s in (p[1:] if home else p).split("/") if s]
+    if not segs:
+        return "~" if home else "/"
+    tail = segs[-2:]                       # parent + current dir
+    truncated = home or len(segs) > len(tail)
+    return ("~/" if truncated else "/") + "/".join(tail)
 
 wd = shorten_path(_full)
 
