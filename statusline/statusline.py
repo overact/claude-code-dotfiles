@@ -9,6 +9,8 @@ m = data.get("model", {})
 c = data.get("context_window", {})
 e = data.get("effort", {}) or {}
 t = data.get("thinking", {}) or {}
+cost = data.get("cost", {}) or {}
+transcript_path = data.get("transcript_path")
 
 
 user = os.getenv("USER", "")
@@ -49,6 +51,97 @@ def bar(pct, width=6):
     if pct is None: return "?" * width
     filled = round(pct / 100 * width)
     return "▓" * filled + "░" * (width - filled)
+
+SESSION_MIN_BYTES = 4_000_000   # ~4 MiB transcript
+SESSION_MIN_TURNS = 50
+
+def long_session(tp):
+    """True when the transcript is large (≥4MB) or long (≥50 user turns).
+
+    Mirrors the old handoff_reminder Stop hook so that signal lives in the
+    status line instead of polluting context. Size is an O(1) stat; turns are
+    only counted when the file is still under the byte threshold (bounded read).
+    """
+    if not tp:
+        return False
+    try:
+        size = os.stat(tp).st_size
+    except OSError:
+        return False
+    if size >= SESSION_MIN_BYTES:
+        return True
+    try:
+        turns = 0
+        with open(tp, "rb") as f:
+            for line in f:
+                if b'"role":"user"' in line:
+                    turns += 1
+        return turns >= SESSION_MIN_TURNS
+    except OSError:
+        return False
+
+def fmt_duration(ms):
+    """Compact wall-clock duration from milliseconds: '2h05m', '7m12s', '9s'."""
+    try:
+        s = int(ms // 1000)
+    except Exception:
+        return "?"
+    h, rem = divmod(s, 3600)
+    mn, sec = divmod(rem, 60)
+    if h:  return f"{h}h{mn:02d}m"
+    if mn: return f"{mn}m{sec:02d}s"
+    return f"{sec}s"
+
+TOK_CACHE_DIR = os.path.expanduser("~/.claude/.statusline-tokens")
+
+def session_tokens(tp, sid):
+    """Cumulative tokens for this session (input+output+cache), parsed from the
+    transcript. Incremental: a per-session offset cache means each render only
+    reads bytes appended since the last render, so cost stays O(new content)."""
+    if not tp or not sid:
+        return 0
+    try:
+        size = os.stat(tp).st_size
+    except OSError:
+        return 0
+    cache_file = os.path.join(TOK_CACHE_DIR, f"{sid}.json")
+    offset = 0
+    total = 0
+    try:
+        with open(cache_file) as f:
+            cc = json.load(f)
+        if cc.get("size", 0) <= size:            # file grew or unchanged → resume
+            offset = cc.get("offset", 0)
+            total  = cc.get("total", 0)
+    except Exception:
+        pass                                      # shrank/rotated/missing → recount
+    try:
+        with open(tp, "rb") as f:
+            f.seek(offset)
+            chunk = f.read()
+    except OSError:
+        return total
+    for line in chunk.splitlines():
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        u = (d.get("message") or {}).get("usage") or d.get("usage")
+        if not u:
+            continue
+        total += (
+            (u.get("input_tokens") or 0)
+            + (u.get("output_tokens") or 0)
+            + (u.get("cache_creation_input_tokens") or 0)
+            + (u.get("cache_read_input_tokens") or 0)
+        )
+    try:
+        os.makedirs(TOK_CACHE_DIR, exist_ok=True)
+        with open(cache_file, "w") as f:
+            json.dump({"offset": offset + len(chunk), "total": total, "size": size}, f)
+    except Exception:
+        pass
+    return total
 
 def fmt_countdown(iso_ts):
     """Return 'Xh Ym' or 'Xm' until the given ISO timestamp."""
@@ -113,10 +206,16 @@ def load_quota():
 
 quota = load_quota()
 
-# ── Build status line ────────────────────────────────────────────────────────
-prompt = f"{green}{user}@{host}{reset}:{blue}{wd}{reset}"
+# ── Build status line (two lines) ─────────────────────────────────────────────
+SEP = f" {dim}│{reset} "
 
-# Git branch
+def join(parts):
+    return SEP.join(p for p in parts if p)
+
+# ── Line 1: identity / location / model / think / context (the "now" state) ────
+l1 = [f"{green}{user}@{host}{reset}:{blue}{wd}{reset}"]
+
+# Git branch (attached to the cwd segment, not separated)
 try:
     import subprocess
     branch = subprocess.check_output(
@@ -129,35 +228,29 @@ try:
             stderr=subprocess.DEVNULL, cwd=os.getcwd()
         ) != 0
         marker = f"{red}✗{reset}" if dirty else f"{green}✓{reset}"
-        prompt += f" {dim}({reset}{yellow}{branch}{reset}{marker}{dim}){reset}"
+        l1[0] += f" {dim}({reset}{yellow}{branch}{reset}{marker}{dim}){reset}"
 except Exception:
     pass
 
 # Model
 model = m.get("display_name", "")
 if model:
-    prompt += f" {dim}│{reset} {cyan}{model}{reset}"
+    l1.append(f"{cyan}{model}{reset}")
 
 # Think mode: effort.level (low/medium/high/xhigh/max) + thinking.enabled
-# Renders as "🧠level" when thinking is enabled; "off" in dim when explicitly disabled;
-# nothing when the model doesn't support effort (field absent).
 _effort_level = e.get("level")
 _thinking_on = t.get("enabled")
 if _effort_level or _thinking_on is not None:
     _effort_colors = {
-        "low":    dim,
-        "medium": green,
-        "high":   yellow,
-        "xhigh":  red,
-        "max":    bright_red,
+        "low": dim, "medium": green, "high": yellow, "xhigh": red, "max": bright_red,
     }
     if _thinking_on is False:
-        prompt += f" {dim}│ 🧠off{reset}"
+        l1.append(f"🧠off")
     elif _effort_level:
         col = _effort_colors.get(_effort_level, cyan)
-        prompt += f" {dim}│{reset} {col}🧠{_effort_level}{reset}"
+        l1.append(f"{col}🧠{_effort_level}{reset}")
     elif _thinking_on:
-        prompt += f" {dim}│{reset} {green}🧠on{reset}"
+        l1.append(f"{green}🧠on{reset}")
 
 # Context window + actionable hint
 pct = c.get("used_percentage")
@@ -167,30 +260,59 @@ if pct is not None:
     ctx_str = f"{ctx_color}{pct}%{reset}"
     if win:
         ctx_str += f"/{fmt_ctx_window(win)}"
-    prompt += f" {dim}│{reset} ctx {ctx_str}"
+    seg = f"ctx {ctx_str}"
     if pct >= 80:
-        prompt += f" {bright_red}→ handoff?{reset}"
+        seg += f" {bright_red}→ handoff?{reset}"
     elif pct >= 75:
-        prompt += f" {yellow}→ /compact?{reset}"
+        seg += f" {yellow}→ /compact?{reset}"
+    l1.append(seg)
 
-# 5-hour quota
+# ── Line 2: time / cumulative usage / budgets (metrics over time) ──────────────
+l2 = []
+
+# Local time
+l2.append(f"{dim}🕐{reset}{datetime.now().astimezone().strftime('%H:%M')}")
+
+# Session runtime
+_dur = cost.get("total_duration_ms")
+if _dur:
+    l2.append(f"⏱{fmt_duration(_dur)}")
+
+# Lines changed this session (from cost; free)
+_la = cost.get("total_lines_added") or 0
+_lr = cost.get("total_lines_removed") or 0
+if _la or _lr:
+    l2.append(f"Δ {green}+{_la}{reset}/{red}-{_lr}{reset}")
+
+# Session token consumption (incremental transcript parse)
+_tok = session_tokens(transcript_path, data.get("session_id"))
+if _tok:
+    l2.append(f"{cyan}{fmt_tokens(_tok)}{reset} tok")
+
+# Session cost
+_usd = cost.get("total_cost_usd")
+if _usd:
+    l2.append(f"${_usd:.2f}")
+
+# 5-hour quota  (space after ↻ so the countdown can't touch the glyph)
 five = quota.get("five_hour", {})
 five_pct = five.get("utilization")
-five_reset = five.get("resets_at", "")
 if five_pct is not None:
     fc = color_for_pct(five_pct)
-    countdown = fmt_countdown(five_reset) if five_reset else "?"
-    b = bar(five_pct)
-    prompt += f" {dim}│{reset} 5h {fc}{b} {five_pct:.0f}%{reset} ↻{countdown}"
+    cd = fmt_countdown(five.get("resets_at", "")) if five.get("resets_at") else "?"
+    l2.append(f"5h {fc}{bar(five_pct)} {five_pct:.0f}%{reset} ↻ {cd}")
 
 # 7-day quota
 seven = quota.get("seven_day", {})
 seven_pct = seven.get("utilization")
-seven_reset = seven.get("resets_at", "")
 if seven_pct is not None:
     sc = color_for_pct(seven_pct)
-    countdown = fmt_countdown(seven_reset) if seven_reset else "?"
-    b = bar(seven_pct)
-    prompt += f" {dim}│{reset} 7d {sc}{b} {seven_pct:.0f}%{reset} ↻{countdown}"
+    cd = fmt_countdown(seven.get("resets_at", "")) if seven.get("resets_at") else "?"
+    l2.append(f"7d {sc}{bar(seven_pct)} {seven_pct:.0f}%{reset} ↻ {cd}")
 
-print(prompt)
+# Long-session flag (transcript size/turns) — replaces the handoff_reminder Stop hook
+if long_session(transcript_path):
+    l2.append(f"{bright_red}⚑handoff{reset}")
+
+print(join(l1))
+print(join(l2))
