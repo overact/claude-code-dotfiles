@@ -16,9 +16,24 @@ transcript_path = data.get("transcript_path")
 user = os.getenv("USER", "")
 host = os.uname().nodename.split(".")[0] if hasattr(os, "uname") else "unknown"
 _cwd = data.get("workspace", {}).get("current_dir") or data.get("cwd") or os.getcwd()
-# Use full path like \w in PS1, but collapse $HOME to ~
+# Collapse $HOME to ~, then abbreviate intermediate segments to their first char
+# (fish/powerlevel10k style): keep the leading ~ or / and the final segment full,
+# so a deep path like /mnt/data/proj/my_repo renders as /m/d/p/my_repo.
 _home = os.path.expanduser("~")
-wd = _cwd.replace(_home, "~", 1) if _cwd.startswith(_home) else _cwd
+_full = _cwd.replace(_home, "~", 1) if _cwd.startswith(_home) else _cwd
+
+def shorten_path(p):
+    lead = "~" if p.startswith("~") else ("/" if p.startswith("/") else "")
+    parts = [s for s in p.strip("/").lstrip("~").strip("/").split("/") if s]
+    if not parts:
+        return p
+    def abbr(s):
+        return (s[:2] if s.startswith(".") else s[:1])
+    short = [abbr(s) for s in parts[:-1]] + [parts[-1]]
+    prefix = "~/" if lead == "~" else lead   # "/" already separates; "~" needs one
+    return prefix + "/".join(short)
+
+wd = shorten_path(_full)
 
 # ── ANSI colors ──────────────────────────────────────────────────────────────
 green      = "\033[01;32m"
@@ -115,24 +130,32 @@ def fmt_duration(ms):
 TOK_CACHE_DIR = os.path.expanduser("~/.claude/.statusline-tokens")
 
 def session_tokens(tp, sid):
-    """Cumulative tokens for this session (input+output+cache), parsed from the
-    transcript. Incremental: a per-session offset cache means each render only
-    reads bytes appended since the last render, so cost stays O(new content)."""
+    """Cumulative tokens for this session, split into fresh vs cache-read.
+
+    Returns (work, cache_read): `work` = input + output + cache_creation (tokens
+    billed at full rate — the real processing), `cache_read` = cached-prefix
+    reads (billed ~0.1×). Lumping the two inflates the count, so the status line
+    shows them apart. Incremental: a per-session offset cache means each render
+    only reads bytes appended since the last render, so cost stays O(new)."""
     if not tp or not sid:
-        return 0
+        return 0, 0
     try:
         size = os.stat(tp).st_size
     except OSError:
-        return 0
+        return 0, 0
     cache_file = os.path.join(TOK_CACHE_DIR, f"{sid}.json")
     offset = 0
-    total = 0
+    work = 0
+    cread = 0
     try:
         with open(cache_file) as f:
             cc = json.load(f)
-        if cc.get("size", 0) <= size:            # file grew or unchanged → resume
+        # Resume only from a v2 cache (has "work"); older files lack the split,
+        # so recount from 0 rather than mislabel their lumped total.
+        if cc.get("size", 0) <= size and "work" in cc:
             offset = cc.get("offset", 0)
-            total  = cc.get("total", 0)
+            work   = cc.get("work", 0)
+            cread  = cc.get("cread", 0)
     except Exception:
         pass                                      # shrank/rotated/missing → recount
     try:
@@ -140,7 +163,7 @@ def session_tokens(tp, sid):
             f.seek(offset)
             chunk = f.read()
     except OSError:
-        return total
+        return work, cread
     for line in chunk.splitlines():
         try:
             d = json.loads(line)
@@ -149,19 +172,22 @@ def session_tokens(tp, sid):
         u = (d.get("message") or {}).get("usage") or d.get("usage")
         if not u:
             continue
-        total += (
+        work += (
             (u.get("input_tokens") or 0)
             + (u.get("output_tokens") or 0)
             + (u.get("cache_creation_input_tokens") or 0)
-            + (u.get("cache_read_input_tokens") or 0)
         )
+        cread += (u.get("cache_read_input_tokens") or 0)
     try:
         os.makedirs(TOK_CACHE_DIR, exist_ok=True)
         with open(cache_file, "w") as f:
-            json.dump({"offset": offset + len(chunk), "total": total, "size": size}, f)
+            json.dump(
+                {"offset": offset + len(chunk), "work": work, "cread": cread, "size": size},
+                f,
+            )
     except Exception:
         pass
-    return total
+    return work, cread
 
 def fmt_countdown(iso_ts):
     """Return 'Xh Ym' or 'Xm' until the given ISO timestamp."""
@@ -303,10 +329,15 @@ _diff = git_uncommitted_diff(os.getcwd())
 if _diff and (_diff[0] or _diff[1]):
     l2.append(f"Δ {green}+{_diff[0]}{reset}/{red}-{_diff[1]}{reset}")
 
-# Session token consumption (incremental transcript parse)
-_tok = session_tokens(transcript_path, data.get("session_id"))
-if _tok:
-    l2.append(f"{cyan}{fmt_tokens(_tok)}{reset} tok")
+# Session token consumption (incremental parse), fresh tokens vs cache reads.
+# `work` is billed at full rate; cache reads are ~0.1× — kept apart so the count
+# isn't inflated by re-reading a large cached context.
+_work, _cread = session_tokens(transcript_path, data.get("session_id"))
+if _work or _cread:
+    seg = f"{cyan}{fmt_tokens(_work)}{reset} tok"
+    if _cread:
+        seg += f" {dim}+{fmt_tokens(_cread)} cache{reset}"
+    l2.append(seg)
 
 # Session cost
 _usd = cost.get("total_cost_usd")
