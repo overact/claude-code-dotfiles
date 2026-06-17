@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Status line: user@host:cwd | model | think | ctx | 5hr quota | weekly quota"""
 
-import json, sys, os, time
+import json, sys, os, time, subprocess
 from datetime import datetime, timezone
 
 data = json.loads(sys.stdin.read())
@@ -79,6 +79,26 @@ def long_session(tp):
         return turns >= SESSION_MIN_TURNS
     except OSError:
         return False
+
+def git_uncommitted_diff(cwd):
+    """(added, removed) lines for uncommitted tracked changes vs HEAD.
+
+    `git diff --numstat HEAD` covers both staged and unstaged changes; untracked
+    files are not counted. Returns None outside a repo / with no HEAD yet."""
+    try:
+        out = subprocess.check_output(
+            ["git", "diff", "--numstat", "HEAD"],
+            stderr=subprocess.DEVNULL, text=True, cwd=cwd,
+        )
+    except Exception:
+        return None
+    add = rem = 0
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+            add += int(parts[0])
+            rem += int(parts[1])
+    return add, rem
 
 def fmt_duration(ms):
     """Compact wall-clock duration from milliseconds: '2h05m', '7m12s', '9s'."""
@@ -278,11 +298,10 @@ _dur = cost.get("total_duration_ms")
 if _dur:
     l2.append(f"⏱{fmt_duration(_dur)}")
 
-# Lines changed this session (from cost; free)
-_la = cost.get("total_lines_added") or 0
-_lr = cost.get("total_lines_removed") or 0
-if _la or _lr:
-    l2.append(f"Δ {green}+{_la}{reset}/{red}-{_lr}{reset}")
+# Uncommitted working-tree changes vs HEAD (staged + unstaged)
+_diff = git_uncommitted_diff(os.getcwd())
+if _diff and (_diff[0] or _diff[1]):
+    l2.append(f"Δ {green}+{_diff[0]}{reset}/{red}-{_diff[1]}{reset}")
 
 # Session token consumption (incremental transcript parse)
 _tok = session_tokens(transcript_path, data.get("session_id"))
