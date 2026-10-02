@@ -320,35 +320,41 @@ _diff = git_uncommitted_diff(_cwd)
 if _diff and (_diff[0] or _diff[1]):
     l2.append(f"Δ {add_c}+{_diff[0]}{reset}/{red}-{_diff[1]}{reset}")
 
-# Session token consumption (incremental parse), fresh tokens vs cache reads.
-# `work` is billed at full rate; cache reads are ~0.1× — kept apart so the count
-# isn't inflated by re-reading a large cached context.
+# Tokens and prompt cache as one segment: `1.5M tok +59.5M cache (59m · 2 miss)`.
+# `work` is billed at full rate; cache reads are ~0.1x, kept apart so the count
+# isn't inflated by re-reading a large cached context. In the brackets: how long
+# the cached prefix stays warm (Claude Code >= 2.1.251, `prompt_cache`), then the
+# miss count. Quiet except for the last minute and a cold cache. The 5m/1h TTL
+# runs out while you are idle, so the countdown only stays honest with
+# "refreshInterval" set on the statusLine. A warm flag past its expiry counts as
+# cold. No symbols of uncertain width here (they overlapped the digits next to them).
 _work, _cread = session_tokens(transcript_path, data.get("session_id"))
-if _work or _cread:
-    seg = f"{cyan}{fmt_tokens(_work)}{reset} tok"
-    if _cread:
-        seg += f" {dim}+{fmt_tokens(_cread)} cache{reset}"
-    l2.append(seg)
-
-# Prompt cache (Claude Code >= 2.1.251): hit ratio and how long the cached prefix
-# stays warm. The 5m/1h TTL runs out while you are idle, so the countdown only
-# stays honest with "refreshInterval" set on the statusLine. Hidden when the
-# provider reports no cache tokens. A warm flag past its expiry counts as cold.
 _pc = data.get("prompt_cache") or {}
+_note = []
 if _pc.get("caching_observed"):
-    seg = "cache"
-    if _pc.get("hit_ratio") is not None:
-        seg += f" {_pc['hit_ratio'] * 100:.0f}%"
     _exp = _pc.get("expires_at")
     _left = (_exp - time.time()) if _exp else 0
     if _pc.get("warm") and _left > 0:
-        seg += f" {yellow if _left < 60 else green}● {fmt_countdown(_exp)}{reset}"
+        _note.append(f"{yellow if _left < 60 else dim}{fmt_countdown(_exp)}{reset}")
     else:
-        seg += f" {red}❄ cold{reset}"
+        _cold = f"{bright_red}cold{reset}"
         if _pc.get("recache_tokens_if_cold"):
-            seg += f" {dim}~{fmt_tokens(_pc['recache_tokens_if_cold'])} to re-cache{reset}"
+            _cold += f"{dim} ~{fmt_tokens(_pc['recache_tokens_if_cold'])} to re-cache{reset}"
+        _note.append(_cold)
     if _pc.get("misses"):
-        seg += f" {dim}⚠{_pc['misses']}{reset}"
+        _note.append(f"{dim}{_pc['misses']} miss{reset}")
+if _work or _cread or _note:
+    parts = []
+    if _work or _cread:
+        parts.append(f"{cyan}{fmt_tokens(_work)}{reset} tok")
+    if _cread:
+        parts.append(f"{dim}+{fmt_tokens(_cread)} cache{reset}")
+    elif _note:
+        parts.append(f"{dim}cache{reset}")
+    seg = " ".join(parts)
+    if _note:
+        _dot = f" {dim}·{reset} "
+        seg += f" {dim}({reset}{_dot.join(_note)}{dim}){reset}"
     l2.append(seg)
 
 # Session cost
