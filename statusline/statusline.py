@@ -2,7 +2,7 @@
 """Status line: user@host:cwd | model | think | ctx | 5hr quota | weekly quota"""
 
 import json, sys, os, time, subprocess
-from datetime import datetime, timezone
+from datetime import datetime
 
 data = json.loads(sys.stdin.read())
 m = data.get("model", {})
@@ -188,12 +188,10 @@ def session_tokens(tp, sid):
         pass
     return work, cread
 
-def fmt_countdown(iso_ts):
-    """Return 'Xh Ym' or 'Xm' until the given ISO timestamp."""
+def fmt_countdown(epoch):
+    """Return 'Xh Ym' or 'Xm' until the given Unix epoch (seconds)."""
     try:
-        target = datetime.fromisoformat(iso_ts).astimezone(timezone.utc)
-        now    = datetime.now(timezone.utc)
-        secs   = int((target - now).total_seconds())
+        secs = int(epoch - time.time())
         if secs <= 0: return "now"
         h, rem = divmod(secs, 3600)
         mins   = rem // 60
@@ -202,54 +200,11 @@ def fmt_countdown(iso_ts):
     except Exception:
         return "?"
 
-# ── Quota data (cached 180s) ──────────────────────────────────────────────────
-CACHE_FILE  = os.path.expanduser("~/.claude/usage-cache.json")
-CACHE_TTL   = 180   # seconds
-
-def load_quota():
-    """Fetch usage from Anthropic OAuth API, with file-level caching."""
-    # Try cache first
-    try:
-        if os.path.exists(CACHE_FILE):
-            with open(CACHE_FILE) as f:
-                cached = json.load(f)
-            if time.time() - cached.get("_ts", 0) < CACHE_TTL:
-                return cached
-    except Exception:
-        pass
-
-    # Read OAuth token
-    try:
-        creds_path = os.path.expanduser("~/.claude/.credentials.json")
-        with open(creds_path) as f:
-            creds = json.load(f)
-        token = creds.get("claudeAiOauth", {}).get("accessToken", "")
-        if not token:
-            return {}
-    except Exception:
-        return {}
-
-    # Call Anthropic usage API
-    try:
-        import urllib.request
-        req = urllib.request.Request(
-            "https://api.anthropic.com/api/oauth/usage",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "anthropic-beta": "oauth-2025-04-20",
-                "Content-Type": "application/json",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            result = json.loads(resp.read())
-        result["_ts"] = time.time()
-        with open(CACHE_FILE, "w") as f:
-            json.dump(result, f)
-        return result
-    except Exception:
-        return {}
-
-quota = load_quota()
+# ── Quota data ────────────────────────────────────────────────────────────────
+# Claude Code passes the 5h / 7d rate limits on stdin (`rate_limits`, claude.ai
+# Pro/Max only). It is absent until the session's first API response, so the
+# quota segments simply stay hidden until then. No network or credential access.
+quota = data.get("rate_limits") or {}
 
 # ── Build status line (two lines) ─────────────────────────────────────────────
 SEP = f" {dim}│{reset} "
@@ -348,18 +303,18 @@ if _usd:
 
 # 5-hour quota  (space after ↻ so the countdown can't touch the glyph)
 five = quota.get("five_hour", {})
-five_pct = five.get("utilization")
+five_pct = five.get("used_percentage")
 if five_pct is not None:
     fc = color_for_pct(five_pct)
-    cd = fmt_countdown(five.get("resets_at", "")) if five.get("resets_at") else "?"
+    cd = fmt_countdown(five["resets_at"]) if five.get("resets_at") else "?"
     l2.append(f"5h {fc}{bar(five_pct)} {five_pct:.0f}%{reset} ↻ {cd}")
 
 # 7-day quota
 seven = quota.get("seven_day", {})
-seven_pct = seven.get("utilization")
+seven_pct = seven.get("used_percentage")
 if seven_pct is not None:
     sc = color_for_pct(seven_pct)
-    cd = fmt_countdown(seven.get("resets_at", "")) if seven.get("resets_at") else "?"
+    cd = fmt_countdown(seven["resets_at"]) if seven.get("resets_at") else "?"
     l2.append(f"7d {sc}{bar(seven_pct)} {seven_pct:.0f}%{reset} ↻ {cd}")
 
 # Long-session flag (transcript size/turns) — replaces the handoff_reminder Stop hook
