@@ -13,7 +13,7 @@ gitignored.
 
 | Path | Scope | What it does |
 |---|---|---|
-| `statusline/statusline.py` | status line | `user@host:cwd (branch✓) │ model │ 🧠effort │ ctx% │ 5h quota │ 7d quota`. Quota read from the `rate_limits` field Claude Code passes on stdin (Pro/Max only; hidden until the session's first API response). |
+| `statusline/statusline.py` | status line | `user@host:cwd (branch✓) │ model │ 🧠effort │ ctx% │ 5h quota │ 7d quota`. Quota read from the `rate_limits` field Claude Code passes on stdin (Pro/Max only; hidden until the session's first API response). Also shows prompt-cache hit ratio and a warm/cold countdown (`prompt_cache`, Claude Code ≥ 2.1.251); the template sets `refreshInterval: 30` so the countdown keeps ticking while idle. |
 | `hooks/project_session_start.py` | `SessionStart` | Auto-detects the git root and injects "read these first" files (`AGENTS.md`, `CLAUDE.md`, `docs/…`), open `TODO.md` items, and the latest handoff note. Per-project tweaks via `project-overrides.json`. |
 | `hooks/handoff_reminder.py` | `Stop` | Reminds you to write a handoff note when a session gets long (≥4 MB transcript or ≥50 user turns). |
 | `hooks/notify_local.py` | `Notification` + `Stop` | Native desktop notification — **WSL2 / native Windows / macOS / Linux**, auto-detected. Fires on "needs your input", and on turn-end only if the turn ran ≥`CC_BUSY_THRESHOLD_S` (60 s). |

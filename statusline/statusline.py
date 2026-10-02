@@ -195,8 +195,9 @@ def fmt_countdown(epoch):
         if secs <= 0: return "now"
         h, rem = divmod(secs, 3600)
         mins   = rem // 60
-        if h:   return f"{h}h{mins:02d}m"
-        return  f"{mins}m"
+        if h:    return f"{h}h{mins:02d}m"
+        if mins: return f"{mins}m"
+        return   f"{secs}s"
     except Exception:
         return "?"
 
@@ -294,6 +295,27 @@ if _work or _cread:
     seg = f"{cyan}{fmt_tokens(_work)}{reset} tok"
     if _cread:
         seg += f" {dim}+{fmt_tokens(_cread)} cache{reset}"
+    l2.append(seg)
+
+# Prompt cache (Claude Code >= 2.1.251): hit ratio and how long the cached prefix
+# stays warm. The 5m/1h TTL runs out while you are idle, so the countdown only
+# stays honest with "refreshInterval" set on the statusLine. Hidden when the
+# provider reports no cache tokens. A warm flag past its expiry counts as cold.
+_pc = data.get("prompt_cache") or {}
+if _pc.get("caching_observed"):
+    seg = "cache"
+    if _pc.get("hit_ratio") is not None:
+        seg += f" {_pc['hit_ratio'] * 100:.0f}%"
+    _exp = _pc.get("expires_at")
+    _left = (_exp - time.time()) if _exp else 0
+    if _pc.get("warm") and _left > 0:
+        seg += f" {yellow if _left < 60 else green}● {fmt_countdown(_exp)}{reset}"
+    else:
+        seg += f" {red}❄ cold{reset}"
+        if _pc.get("recache_tokens_if_cold"):
+            seg += f" {dim}~{fmt_tokens(_pc['recache_tokens_if_cold'])} to re-cache{reset}"
+    if _pc.get("misses"):
+        seg += f" {dim}⚠{_pc['misses']}{reset}"
     l2.append(seg)
 
 # Session cost

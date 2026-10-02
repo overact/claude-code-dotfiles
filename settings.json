@@ -59,6 +59,7 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "python3 $HOME/.claude/statusline.py 2>/dev/null"
+    "command": "python3 $HOME/.claude/statusline.py 2>/dev/null",
+    "refreshInterval": 30
   }
 }
