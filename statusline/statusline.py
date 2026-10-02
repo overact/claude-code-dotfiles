@@ -260,18 +260,21 @@ def join(parts):
 # ── Line 1: identity / location / model / think / context (the "now" state) ────
 l1 = [f"{green}{user}@{host}{reset}:{blue}{wd}{reset}"]
 
-# Git branch (attached to the cwd segment, not separated)
+# Git branch (attached to the cwd segment, not separated). Use the session's
+# workspace dir, not the process cwd, which can differ (e.g. worktree sessions).
 try:
     import subprocess
     branch = subprocess.check_output(
         ["git", "branch", "--show-current"],
-        stderr=subprocess.DEVNULL, text=True, cwd=os.getcwd()
+        stderr=subprocess.DEVNULL, text=True, cwd=_cwd
     ).strip()
     if branch:
-        dirty = subprocess.call(
-            ["git", "diff", "--quiet", "--exit-code"],
-            stderr=subprocess.DEVNULL, cwd=os.getcwd()
-        ) != 0
+        # Dirty = any staged or unstaged tracked change, the same set the Δ
+        # segment counts (untracked files excluded; works before the first commit).
+        dirty = bool(subprocess.check_output(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            stderr=subprocess.DEVNULL, text=True, cwd=_cwd
+        ).strip())
         marker = f"{red}✗{reset}" if dirty else f"{green}✓{reset}"
         l1[0] += f" {dim}({reset}{yellow}{branch}{reset}{marker}{dim}){reset}"
 except Exception:
@@ -324,7 +327,7 @@ if _dur:
     l2.append(f"⏱{fmt_duration(_dur)}")
 
 # Uncommitted working-tree changes vs HEAD (staged + unstaged)
-_diff = git_uncommitted_diff(os.getcwd())
+_diff = git_uncommitted_diff(_cwd)
 if _diff and (_diff[0] or _diff[1]):
     l2.append(f"Δ {green}+{_diff[0]}{reset}/{red}-{_diff[1]}{reset}")
 
