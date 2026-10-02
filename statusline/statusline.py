@@ -35,14 +35,47 @@ def shorten_path(p):
 wd = shorten_path(_full)
 
 # ── ANSI colors ──────────────────────────────────────────────────────────────
-green      = "\033[01;32m"
-blue       = "\033[01;34m"
-reset      = "\033[00m"
-yellow     = "\033[01;33m"
-red        = "\033[01;31m"
-bright_red = "\033[01;91m"
-cyan       = "\033[01;36m"
-dim        = "\033[02m"
+reset = "\033[00m"
+
+def _rgb(hex_color):
+    h = hex_color.lstrip("#")
+    return f"\033[38;2;{int(h[0:2], 16)};{int(h[2:4], 16)};{int(h[4:6], 16)}m"
+
+def _palette(**roles):
+    return {role: _rgb(color) for role, color in roles.items()}
+
+# Pick one with CC_STATUSLINE_THEME (e.g. in settings.json "env"); unknown -> default.
+# default uses the terminal's own 16 colors, mono uses none (dim + bold only).
+THEMES = {
+    "default": {
+        "muted": "\033[02m",    "path": "\033[01;34m", "branch": "\033[01;33m",
+        "ok":    "\033[01;32m", "warn": "\033[01;33m", "bad":    "\033[01;91m",
+        "accent": "\033[01;36m", "add": "\033[01;32m", "del":    "\033[01;31m",
+    },
+    "tokyo": _palette(muted="#565f89", path="#7aa2f7", branch="#e0af68", ok="#9ece6a", warn="#e0af68",
+                      bad="#f7768e", accent="#7dcfff", add="#9ece6a", **{"del": "#f7768e"}),
+    "nord": _palette(muted="#616e88", path="#81a1c1", branch="#ebcb8b", ok="#a3be8c", warn="#ebcb8b",
+                     bad="#bf616a", accent="#88c0d0", add="#a3be8c", **{"del": "#bf616a"}),
+    "solarized": _palette(muted="#586e75", path="#268bd2", branch="#b58900", ok="#859900", warn="#b58900",
+                          bad="#dc322f", accent="#2aa198", add="#859900", **{"del": "#dc322f"}),
+    "dracula": _palette(muted="#6272a4", path="#bd93f9", branch="#f1fa8c", ok="#50fa7b", warn="#ffb86c",
+                        bad="#ff5555", accent="#8be9fd", add="#50fa7b", **{"del": "#ff5555"}),
+    "mono": {
+        "muted": "\033[02m", "path": "", "branch": "", "ok": "", "warn": "",
+        "bad": "\033[01m", "accent": "", "add": "", "del": "",
+    },
+}
+_theme = THEMES.get(os.getenv("CC_STATUSLINE_THEME", "default").strip().lower(), THEMES["default"])
+
+green      = _theme["ok"]
+blue       = _theme["path"]
+yellow     = _theme["warn"]
+branch_c   = _theme["branch"]
+red        = _theme["del"]
+bright_red = _theme["bad"]
+cyan       = _theme["accent"]
+add_c      = _theme["add"]
+dim        = _theme["muted"]
 
 def color_for_pct(pct):
     if pct is None: return dim
@@ -232,7 +265,7 @@ try:
             stderr=subprocess.DEVNULL, text=True, cwd=_cwd
         ).strip())
         marker = f"{red}✗{reset}" if dirty else f"{green}✓{reset}"
-        l1[0] += f" {dim}({reset}{yellow}{branch}{reset}{marker}{dim}){reset}"
+        l1[0] += f" {dim}({reset}{branch_c}{branch}{reset}{marker}{dim}){reset}"
 except Exception:
     pass
 
@@ -285,7 +318,7 @@ if _dur:
 # Uncommitted working-tree changes vs HEAD (staged + unstaged)
 _diff = git_uncommitted_diff(_cwd)
 if _diff and (_diff[0] or _diff[1]):
-    l2.append(f"Δ {green}+{_diff[0]}{reset}/{red}-{_diff[1]}{reset}")
+    l2.append(f"Δ {add_c}+{_diff[0]}{reset}/{red}-{_diff[1]}{reset}")
 
 # Session token consumption (incremental parse), fresh tokens vs cache reads.
 # `work` is billed at full rate; cache reads are ~0.1× — kept apart so the count
