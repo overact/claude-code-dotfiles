@@ -282,12 +282,12 @@ if _effort_level or _thinking_on is not None:
         "low": dim, "medium": green, "high": yellow, "xhigh": red, "max": bright_red,
     }
     if _thinking_on is False:
-        l1.append(f"🧠off")
+        l1.append(f"🧠 off")
     elif _effort_level:
         col = _effort_colors.get(_effort_level, cyan)
-        l1.append(f"{col}🧠{_effort_level}{reset}")
+        l1.append(f"🧠 {col}{_effort_level}{reset}")
     elif _thinking_on:
-        l1.append(f"{green}🧠on{reset}")
+        l1.append(f"🧠 {green}on{reset}")
 
 # Context window + actionable hint
 pct = c.get("used_percentage")
@@ -307,13 +307,14 @@ if pct is not None:
 # ── Line 2: time / cumulative usage / budgets (metrics over time) ──────────────
 l2 = []
 
-# Local time
-l2.append(f"{dim}🕐{reset}{datetime.now().astimezone().strftime('%H:%M')}")
+# Local time. A space follows every icon: terminals disagree on how wide emoji are,
+# and the next character landed on top of them.
+l2.append(f"{dim}🕐 {reset}{datetime.now().astimezone().strftime('%H:%M')}")
 
 # Session runtime
 _dur = cost.get("total_duration_ms")
 if _dur:
-    l2.append(f"⏱{fmt_duration(_dur)}")
+    l2.append(f"{dim}⏱ {reset}{fmt_duration(_dur)}")
 
 # Uncommitted working-tree changes vs HEAD (staged + unstaged)
 _diff = git_uncommitted_diff(_cwd)
