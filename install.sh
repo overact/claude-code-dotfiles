@@ -54,7 +54,7 @@ place() {  # place repo file $1 at dest $2 (symlink or copy), backing up first
 echo "Installing Claude Code dotfiles from $REPO_DIR -> $CLAUDE_DIR ($MODE)"
 
 # 1. Hook scripts
-for f in handoff_reminder.py project_session_start.py notify_local.py; do
+for f in project_session_start.py notify_local.py; do
   place "$REPO_DIR/hooks/$f" "$HOOKS_DIR/$f"
 done
 

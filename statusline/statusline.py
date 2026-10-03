@@ -99,34 +99,6 @@ def bar(pct, width=6):
     filled = round(pct / 100 * width)
     return "▓" * filled + "░" * (width - filled)
 
-SESSION_MIN_BYTES = 4_000_000   # ~4 MiB transcript
-SESSION_MIN_TURNS = 50
-
-def long_session(tp):
-    """True when the transcript is large (≥4MB) or long (≥50 user turns).
-
-    Mirrors the old handoff_reminder Stop hook so that signal lives in the
-    status line instead of polluting context. Size is an O(1) stat; turns are
-    only counted when the file is still under the byte threshold (bounded read).
-    """
-    if not tp:
-        return False
-    try:
-        size = os.stat(tp).st_size
-    except OSError:
-        return False
-    if size >= SESSION_MIN_BYTES:
-        return True
-    try:
-        turns = 0
-        with open(tp, "rb") as f:
-            for line in f:
-                if b'"role":"user"' in line:
-                    turns += 1
-        return turns >= SESSION_MIN_TURNS
-    except OSError:
-        return False
-
 def git_uncommitted_diff(cwd):
     """(added, removed) lines for uncommitted tracked changes vs HEAD.
 
@@ -345,9 +317,7 @@ if pct is not None:
     if win:
         ctx_str += f"/{fmt_ctx_window(win)}"
     seg = f"ctx {ctx_str}"
-    if pct >= 80:
-        seg += f" {bright_red}→ handoff?{reset}"
-    elif pct >= 75:
+    if pct >= 75:
         seg += f" {yellow}→ /compact?{reset}"
     l1.append(seg)
 
@@ -433,10 +403,6 @@ if seven_pct is not None:
     sc = color_for_pct(seven_pct)
     cd = fmt_countdown(seven["resets_at"]) if seven.get("resets_at") else "?"
     l2.append(f"7d {sc}{bar(seven_pct)} {seven_pct:.0f}%{reset} ↻ {cd}")
-
-# Long-session flag (transcript size/turns) — replaces the handoff_reminder Stop hook
-if long_session(transcript_path):
-    l2.append(f"{bright_red}⚑handoff{reset}")
 
 print(join(l1))
 print(join(l2))
