@@ -92,12 +92,13 @@ def main() -> None:
         data = {}
 
     # source: "startup" | "resume" | "clear" | "compact". On compact the prior
-    # handoff + the handoff-writing conventions are already in the live
-    # transcript, so inject a trimmed pointer instead of re-dumping them.
+    # handoff is already in the live transcript, so inject a trimmed pointer
+    # instead of re-dumping it.
     brief = data.get("source") == "compact"
 
     root = find_git_root(data.get("cwd"))
-    if not root:
+    # A home directory kept under git is not a project: nothing to inject there.
+    if not root or root == pathlib.Path.home().resolve():
         print(json.dumps({"continue": True}))
         return
 
@@ -108,7 +109,6 @@ def main() -> None:
         if "handoff_dir" in overrides
         else root / "docs" / "handoffs"
     )
-    handoff_dir.mkdir(parents=True, exist_ok=True)
 
     # Candidate repo files (read those that exist)
     candidates = [
@@ -153,14 +153,6 @@ def main() -> None:
     ]
     if handoff_text:
         context_parts += ["", handoff_text]
-    if not brief:
-        context_parts += [
-            "",
-            "Use a new handoff note for long sessions (>40 turns) or when context becomes noisy.",
-            "Name new handoffs as YYYY-MM-DD-HHMM-short-topic.md using local 24-hour time.",
-            "Include `## Agent` with `Tool: Claude Code`.",
-            f"Write handoffs to: {handoff_dir}",
-        ]
 
     print(
         json.dumps(
