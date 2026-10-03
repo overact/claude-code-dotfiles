@@ -37,8 +37,12 @@ cd claude-code-dotfiles
 - Seeds `~/.claude/hooks/project-overrides.json` from the example **only if
   absent**.
 - **Never silently overwrites `~/.claude/settings.json`** (it may hold your API
-  keys). If one exists, the template is written alongside as
-  `settings.json.dotfiles-new` for you to merge. Force with `--force-settings`.
+  keys). If one exists, it is backed up and the template is merged in with `jq`:
+  your values win for every key, except that the template's `hooks` (per event)
+  and `statusLine` are laid over yours, and its `CLAUDE_CODE_PLUGIN_DIRS` entries
+  are appended to your list rather than replacing it. Without `jq`, the template
+  is written alongside as `settings.json.dotfiles-new` for you to merge. Replace
+  outright with `--force-settings`.
 
 Then restart Claude Code (or run `/hooks` to reload).
 

@@ -95,8 +95,19 @@ elif [ "$FORCE_SETTINGS" = "1" ]; then
   echo "  force  $SETTINGS (old one backed up)"
 elif command -v jq &>/dev/null; then
   backup "$SETTINGS"
-  # Deep-merge: existing settings win for scalar keys; template wins for hooks/statusLine
-  jq -s '.[0] * .[1]' "$SETTINGS" "$REPO_DIR/settings.json" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+  # Deep-merge. Your settings win for every key, except that the template's hooks
+  # (per event) and statusLine are laid over them, and the template's
+  # CLAUDE_CODE_PLUGIN_DIRS entries are appended to yours instead of replacing them.
+  # (A plain `.[0] * .[1]` let the template win everywhere.)
+  jq -s '
+    .[0] as $mine | .[1] as $tpl
+    | ($tpl * $mine) * ($tpl | {hooks, statusLine} | with_entries(select(.value != null)))
+    | ($tpl.env.CLAUDE_CODE_PLUGIN_DIRS // "" | split(":") | map(select(. != ""))) as $need
+    | ($mine.env.CLAUDE_CODE_PLUGIN_DIRS // "" | split(":") | map(select(. != ""))) as $have
+    | if ($need | length) > 0
+      then .env.CLAUDE_CODE_PLUGIN_DIRS = ($have + ($need - $have) | join(":"))
+      else . end
+  ' "$SETTINGS" "$REPO_DIR/settings.json" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
   echo "  merge  $SETTINGS (hooks + statusLine merged in, your keys preserved)"
 else
   cp "$REPO_DIR/settings.json" "$SETTINGS.dotfiles-new"
