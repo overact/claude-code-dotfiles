@@ -85,6 +85,16 @@ def handoff_sort_key(path: pathlib.Path) -> tuple[int, float, str]:
     return (0, mtime, path.name)
 
 
+def agents_md_auto_loaded(root: pathlib.Path) -> bool:
+    """Whether Claude Code loads the root AGENTS.md by itself: by default it does
+    when the project has no CLAUDE.md, and always when CLAUDE.md imports it."""
+    claude_md = root / "CLAUDE.md"
+    if not claude_md.exists():
+        return True
+    text = claude_md.read_text(encoding="utf-8", errors="replace")
+    return any(line.strip() in ("@AGENTS.md", "@./AGENTS.md") for line in text.splitlines())
+
+
 def main() -> None:
     try:
         data = json.load(sys.stdin)
@@ -110,10 +120,10 @@ def main() -> None:
         else root / "docs" / "handoffs"
     )
 
-    # Candidate repo files (read those that exist)
+    # Candidate repo files (read those that exist). CLAUDE.md, and AGENTS.md when
+    # Claude Code loads it too, are already in context: listing them is noise.
     candidates = [
-        root / "AGENTS.md",
-        root / "CLAUDE.md",
+        *([] if agents_md_auto_loaded(root) else [root / "AGENTS.md"]),
         root / "changes.md",
         root / "docs" / "decisions" / "README.md",
         root / "docs" / "experiments" / "README.md",
@@ -145,9 +155,11 @@ def main() -> None:
         "",
         note,
         "",
-        "Before substantive work, prefer reading these project files when relevant:",
-        *[f"- {p}" for p in existing],
-        "",
+        *(
+            ["Before substantive work, prefer reading these project files when relevant:",
+             *[f"- {p}" for p in existing], ""]
+            if existing else []
+        ),
         "Current TODOs:",
         todo_text,
     ]
