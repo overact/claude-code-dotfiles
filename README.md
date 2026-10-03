@@ -17,7 +17,7 @@ gitignored.
 | `mods/cc-turn-metrics/` | mod (function hooks) | Times every main-loop model request as it streams (TTFT to the `message_start` envelope; output tokens over decode time) into `~/.claude/statusline-metrics/<session>.json` for the status line, since Claude Code does not pass these on stdin. Linked to `~/.claude/mods/` and loaded in every session through `CLAUDE_CODE_PLUGIN_DIRS` in `settings.json`. Tests: `claude plugin test mods/cc-turn-metrics`. |
 | `hooks/project_session_start.py` | `SessionStart` | Auto-detects the git root (a home directory under git does not count) and injects "read these first" files (`AGENTS.md`, `CLAUDE.md`, `docs/…`), open `TODO.md` items, and the latest handoff note. Per-project tweaks via `project-overrides.json`. |
 | `hooks/notify_local.py` | `Notification` + `Stop` | Native desktop notification — **WSL2 / native Windows / macOS / Linux**, auto-detected. Fires on "needs your input", and on turn-end only if the turn ran ≥`CC_BUSY_THRESHOLD_S` (60 s). |
-| `tests/` | checks | `bash tests/run.sh`: the settings merge in `install.sh`, the status line (incl. the speed segment) and the SessionStart hook, each in a throwaway `HOME`. CI runs it on every push. |
+| `tests/` | checks | `bash tests/run.sh`: the settings merge in `install.sh`, the status line (incl. the speed segment) and the SessionStart hook, each in a throwaway `HOME`. Run it before pushing. |
 | `settings.json` | user settings | Template wiring all of the above with `$HOME`-relative paths. **No secrets.** |
 | `examples/project-hooks/` | per-project | Templates for repo-scoped hooks (config validation, regression tests). Not synced as user config — see that folder's README. |
 
