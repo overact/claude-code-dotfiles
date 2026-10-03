@@ -1,6 +1,7 @@
 {
   "env": {
-    "CC_BUSY_THRESHOLD_S": "60"
+    "CC_BUSY_THRESHOLD_S": "60",
+    "CLAUDE_CODE_PLUGIN_DIRS": "~/.claude/mods/cc-turn-metrics"
   },
   "permissions": {
     "defaultMode": "auto"

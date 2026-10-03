@@ -6,7 +6,7 @@
 # clobbers an existing settings.json (which may hold your API keys).
 #
 # Usage:
-#   ./install.sh            # symlink hooks + statusline, seed settings/overrides if absent
+#   ./install.sh            # symlink hooks + statusline + mods, seed settings/overrides if absent
 #   ./install.sh --copy     # copy instead of symlink (no live link to the repo)
 #   ./install.sh --force-settings   # overwrite ~/.claude/settings.json (after backup)
 #
@@ -61,7 +61,22 @@ done
 # 2. Statusline
 place "$REPO_DIR/statusline/statusline.py" "$CLAUDE_DIR/statusline.py"
 
-# 3. project-overrides.json — seed from example only if absent (machine-specific)
+# 3. Mods (function-hook plugins): each folder under mods/ goes to ~/.claude/mods/,
+#    which settings.json loads in every session through CLAUDE_CODE_PLUGIN_DIRS
+mkdir -p "$CLAUDE_DIR/mods"
+for d in "$REPO_DIR"/mods/*/; do
+  [ -d "$d" ] || continue
+  src="${d%/}" dest="$CLAUDE_DIR/mods/$(basename "$d")"
+  if [ -e "$dest" ] || [ -L "$dest" ]; then
+    mkdir -p "$BACKUP_DIR"
+    cp -RP "$dest" "$BACKUP_DIR/" 2>/dev/null || true
+    rm -rf "$dest"
+  fi
+  if [ "$MODE" = "symlink" ]; then ln -s "$src" "$dest"; else cp -R "$src" "$dest"; fi
+  echo "  $MODE  $dest"
+done
+
+# 4. project-overrides.json — seed from example only if absent (machine-specific)
 if [ ! -e "$HOOKS_DIR/project-overrides.json" ]; then
   cp "$REPO_DIR/hooks/project-overrides.json.example" "$HOOKS_DIR/project-overrides.json"
   echo "  seed   $HOOKS_DIR/project-overrides.json (edit with your project paths)"
@@ -69,7 +84,7 @@ else
   echo "  keep   $HOOKS_DIR/project-overrides.json (already present)"
 fi
 
-# 4. settings.json — merge hooks/statusLine into existing settings, preserving user keys
+# 5. settings.json — merge hooks/statusLine into existing settings, preserving user keys
 SETTINGS="$CLAUDE_DIR/settings.json"
 if [ ! -e "$SETTINGS" ]; then
   cp "$REPO_DIR/settings.json" "$SETTINGS"

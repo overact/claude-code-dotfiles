@@ -13,7 +13,8 @@ gitignored.
 
 | Path | Scope | What it does |
 |---|---|---|
-| `statusline/statusline.py` | status line | `user@host:cwd (branch✓) │ model │ 🧠effort │ ctx% │ 5h quota │ 7d quota`. Quota read from the `rate_limits` field Claude Code passes on stdin (Pro/Max only; hidden until the session's first API response). Also shows how long the prompt cache stays warm, merged with the token count, e.g. `1.5M tok +59.5M cache (59m · 2 miss)`, from `prompt_cache` (Claude Code ≥ 2.1.251); the template sets `refreshInterval: 30` so the countdown keeps ticking while idle. Colors: set `CC_STATUSLINE_THEME` (e.g. under `env` in `settings.json`) to `default`, `tokyo`, `nord`, `solarized`, `dracula` or `mono`. |
+| `statusline/statusline.py` | status line | `user@host:cwd (branch✓) │ model │ 🧠effort │ ctx% │ 5h quota │ 7d quota`. Quota read from the `rate_limits` field Claude Code passes on stdin (Pro/Max only; hidden until the session's first API response). Also shows how long the prompt cache stays warm, merged with the token count, e.g. `1.5M tok +59.5M cache (59m · 2 miss)`, from `prompt_cache` (Claude Code ≥ 2.1.251); the template sets `refreshInterval: 30` so the countdown keeps ticking while idle. After ctx, the speed of the last 5 main-loop requests, e.g. `81 tok/s (0.8s)`: token-weighted decode speed, then median time to first token, grey 5 minutes after the last request; fed by the `cc-turn-metrics` mod below. Colors: set `CC_STATUSLINE_THEME` (e.g. under `env` in `settings.json`) to `default`, `tokyo`, `nord`, `solarized`, `dracula` or `mono`. |
+| `mods/cc-turn-metrics/` | mod (function hooks) | Times every main-loop model request as it streams (TTFT to the `message_start` envelope; output tokens over decode time) into `~/.claude/statusline-metrics/<session>.json` for the status line, since Claude Code does not pass these on stdin. Linked to `~/.claude/mods/` and loaded in every session through `CLAUDE_CODE_PLUGIN_DIRS` in `settings.json`. Tests: `claude plugin test mods/cc-turn-metrics`. |
 | `hooks/project_session_start.py` | `SessionStart` | Auto-detects the git root and injects "read these first" files (`AGENTS.md`, `CLAUDE.md`, `docs/…`), open `TODO.md` items, and the latest handoff note. Per-project tweaks via `project-overrides.json`. |
 | `hooks/handoff_reminder.py` | `Stop` | Reminds you to write a handoff note when a session gets long (≥4 MB transcript or ≥50 user turns). |
 | `hooks/notify_local.py` | `Notification` + `Stop` | Native desktop notification — **WSL2 / native Windows / macOS / Linux**, auto-detected. Fires on "needs your input", and on turn-end only if the turn ran ≥`CC_BUSY_THRESHOLD_S` (60 s). |
@@ -25,7 +26,7 @@ gitignored.
 ```bash
 git clone https://github.com/overact/claude-code-dotfiles.git
 cd claude-code-dotfiles
-./install.sh            # symlinks hooks + statusline into ~/.claude
+./install.sh            # symlinks hooks + statusline + mods into ~/.claude
 ```
 
 `install.sh` is non-destructive:

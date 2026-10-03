@@ -234,6 +234,53 @@ def fmt_countdown(epoch):
     except Exception:
         return "?"
 
+METRICS_DIR = os.path.expanduser("~/.claude/statusline-metrics")
+SPEED_STALE_S = 300   # 5 min after the last request the speed segment turns grey
+SPEED_WINDOW = 5      # requests the speed segment aggregates
+
+def last_request_metrics(session_id):
+    """The cc-turn-metrics mod's record of this session's last request, or None.
+
+    No file means the mod is not loaded here (or no request has finished yet).
+    """
+    if not session_id:
+        return None
+    try:
+        with open(os.path.join(METRICS_DIR, f"{session_id}.json")) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+def fmt_speed(mt):
+    """Render the speed segment `<tok/s> tok/s (<ttft>s)`, or "" to hide it.
+
+    `mt` is the mod's file: the latest request at the top level (`at`, epoch ms
+    when it finished) and the last requests under `history`. Over the last
+    SPEED_WINDOW of them:
+      tok/s  token-weighted, sum(output_tokens) / sum(gen_ms), skipping samples
+             with no speed (tiny replies, a response that arrived in one burst);
+             short tool-call replies stream ~30% faster than long text, so a
+             plain last value jumps between request kinds
+      TTFT   median, so one slow request does not move it
+    """
+    if not mt:
+        return ""
+    recent = (mt.get("history") or [mt])[-SPEED_WINDOW:]
+    ttfts = sorted(r["ttft_ms"] for r in recent if r.get("ttft_ms") is not None)
+    if not ttfts:
+        return ""
+    n = len(ttfts)
+    med = ttfts[n // 2] if n % 2 else (ttfts[n // 2 - 1] + ttfts[n // 2]) / 2
+    ttft = f"{med / 1000:.1f}s"
+    timed = [r for r in recent if r.get("tps") is not None and r.get("gen_ms")]
+    gen_ms = sum(r["gen_ms"] for r in timed)
+    tps = f"{sum(r['output_tokens'] for r in timed) / gen_ms * 1000:.0f}" if gen_ms else "–"
+    # Past SPEED_STALE_S since the last request finished it describes an old moment: grey.
+    stale = time.time() - mt.get("at", 0) / 1000 > SPEED_STALE_S
+    if stale:
+        return f"{dim}{tps} tok/s ({ttft}){reset}"
+    return f"{cyan}{tps}{reset} tok/s {dim}({reset}{ttft}{dim}){reset}"
+
 # ── Quota data ────────────────────────────────────────────────────────────────
 # Claude Code passes the 5h / 7d rate limits on stdin (`rate_limits`, claude.ai
 # Pro/Max only). It is absent until the session's first API response, so the
@@ -303,6 +350,14 @@ if pct is not None:
     elif pct >= 75:
         seg += f" {yellow}→ /compact?{reset}"
     l1.append(seg)
+
+# Speed of the last few main-loop requests: `85 tok/s (1.7s)`, decode speed then TTFT.
+# Claude Code measures TTFT itself but does not pass it to the status line, so the
+# cc-turn-metrics mod times each request's stream into
+# ~/.claude/statusline-metrics/<session>.json.
+_speed = fmt_speed(last_request_metrics(data.get("session_id")))
+if _speed:
+    l1.append(_speed)
 
 # ── Line 2: time / cumulative usage / budgets (metrics over time) ──────────────
 l2 = []
