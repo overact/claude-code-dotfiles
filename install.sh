@@ -95,13 +95,26 @@ elif [ "$FORCE_SETTINGS" = "1" ]; then
   echo "  force  $SETTINGS (old one backed up)"
 elif command -v jq &>/dev/null; then
   backup "$SETTINGS"
-  # Deep-merge. Your settings win for every key, except that the template's hooks
-  # (per event) and statusLine are laid over them, and the template's
-  # CLAUDE_CODE_PLUGIN_DIRS entries are appended to yours instead of replacing them.
-  # (A plain `.[0] * .[1]` let the template win everywhere.)
-  jq -s '
+  # Deep-merge. Your settings win for every key, except that the template's
+  # statusLine is laid over yours, and the template's CLAUDE_CODE_PLUGIN_DIRS
+  # entries are appended to yours instead of replacing them.
+  # Hooks merge per entry, not per event: in every event, entries that run one of
+  # this repo's hook scripts (or a retired form of one) are dropped and the
+  # template's are appended, so your own hooks in the same event stay put and a
+  # re-run does not duplicate ours.
+  owned=$(cd "$REPO_DIR/hooks" && ls -1 *.py | sed 's|^|hooks/|' \
+    | jq -R . | jq -s '. + [".cc_turn_start"]')  # last: the pre-2026-11 turn-marker hook
+  jq -s --argjson owned "$owned" '
     .[0] as $mine | .[1] as $tpl
-    | ($tpl * $mine) * ($tpl | {hooks, statusLine} | with_entries(select(.value != null)))
+    | def ours: (.command // "") as $c | any($owned[]; . as $o | $c | contains($o));
+      ($tpl * $mine) * ($tpl | {statusLine} | with_entries(select(.value != null)))
+    | .hooks = (($mine.hooks // {}) as $mh | ($tpl.hooks // {}) as $th
+        | reduce (($mh + $th) | keys[]) as $ev ({};
+            .[$ev] = ((($mh[$ev] // [])
+                       | map(.hooks |= map(select(ours | not)))
+                       | map(select(.hooks | length > 0)))
+                      + ($th[$ev] // []))
+          | if .[$ev] == [] then del(.[$ev]) else . end))
     | ($tpl.env.CLAUDE_CODE_PLUGIN_DIRS // "" | split(":") | map(select(. != ""))) as $need
     | ($mine.env.CLAUDE_CODE_PLUGIN_DIRS // "" | split(":") | map(select(. != ""))) as $have
     | if ($need | length) > 0
