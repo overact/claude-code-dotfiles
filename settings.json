@@ -24,7 +24,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'date +%s > \"${XDG_RUNTIME_DIR:-/tmp}/.cc_turn_start\"'",
+            "command": "python3 $HOME/.claude/hooks/notify_local.py",
             "timeout": 3
           }
         ]

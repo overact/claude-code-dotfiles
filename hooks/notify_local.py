@@ -10,16 +10,21 @@ current machine. Auto-detects the platform:
   - Linux         -> `notify-send` (libnotify)
   - else          -> silently no-op
 
-Wire it on both the `Notification` and `Stop` events (see settings.json):
+Wire it on the `UserPromptSubmit`, `Notification` and `Stop` events (see
+settings.json):
 
+  - UserPromptSubmit    -> record this session's turn start; never notifies.
   - Notification event  -> ALWAYS notify, prominently (Claude needs permission /
     input / a choice, or is idle waiting).
-  - Stop event          -> notify ONLY if this turn kept Claude busy for at least
-    CC_BUSY_THRESHOLD_S seconds (default 60). Measured from a turn-start marker
-    written by a tiny UserPromptSubmit hook. Quick Q&A turns stay silent; a long
-    training run / download finishing will fire.
+  - Stop event          -> notify ONLY if a turn the user started kept Claude
+    busy for at least CC_BUSY_THRESHOLD_S seconds (default 60). Quick Q&A turns
+    stay silent; a long training run / download finishing will fire.
+    The Stop consumes the session's turn-start marker, so a turn Claude re-enters
+    on its own (a background subagent or task reporting back) finds none and
+    stays silent. Subagents' own SubagentStop never notifies.
 
-Marker files live under XDG_RUNTIME_DIR (falls back to /tmp).
+Marker files live under XDG_RUNTIME_DIR (falls back to /tmp), one per session,
+so concurrent sessions do not see each other's turns.
 Never blocks Claude: any failure exits 0.
 
 Tunables (env vars):
@@ -43,7 +48,6 @@ BUSY_THRESHOLD_S = int(os.environ.get("CC_BUSY_THRESHOLD_S", "60"))
 DEBOUNCE_S = int(os.environ.get("CC_NOTIFY_DEBOUNCE_S", "8"))
 LANG = os.environ.get("CC_NOTIFY_LANG", "zh")
 RUNTIME = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
-TURN_START = os.path.join(RUNTIME, ".cc_turn_start")
 LAST_TOAST = os.path.join(RUNTIME, ".cc_last_toast")
 
 # ── Localised strings ─────────────────────────────────────────────────────────
@@ -196,13 +200,39 @@ def notify(title: str, body: str, urgent: bool) -> None:
     _dispatch(title, body, urgent)
 
 
-def turn_elapsed() -> float:
-    """Seconds since the turn started; large if the marker is missing."""
+def turn_marker(session_id: str) -> str:
+    """Path of this session's turn-start marker."""
+    safe = "".join(c for c in session_id if c.isalnum() or c in "-_") or "unknown"
+    return os.path.join(RUNTIME, f".cc_turn_start_{safe}")
+
+
+def start_turn(session_id: str) -> None:
+    """UserPromptSubmit: the user started a turn in this session."""
     try:
-        with open(TURN_START) as fh:
-            return time.time() - float(fh.read().strip())
+        with open(turn_marker(session_id), "w") as fh:
+            fh.write(str(time.time()))
     except Exception:
-        return float("inf")
+        pass
+
+
+def take_turn(session_id: str) -> float | None:
+    """Stop: seconds since this session's user turn started, consuming the marker.
+
+    None when there is no marker: this turn was not started by a user prompt
+    (Claude re-entered on its own after a background subagent/task finished),
+    or the prompt was submitted before this hook recorded per-session turns.
+    """
+    path = turn_marker(session_id)
+    try:
+        with open(path) as fh:
+            started = float(fh.read().strip())
+    except Exception:
+        return None
+    try:
+        os.remove(path)
+    except Exception:
+        pass
+    return time.time() - started
 
 
 def main() -> int:
@@ -212,22 +242,27 @@ def main() -> int:
         data = {}
 
     event = data.get("hook_event_name", "")
+    session_id = data.get("session_id", "")
     cwd = os.path.basename(data.get("cwd", "") or os.getcwd())
 
-    if event == "Notification":
+    if event == "UserPromptSubmit":
+        start_turn(session_id)
+    elif event == "Notification":
         # Claude wants permission / input / a choice — always, prominently.
         notify(
             S["need_you"].format(cwd=cwd),
             data.get("message", S["need_you_body"]),
             urgent=True,
         )
-    else:  # Stop / SubagentStop — only when the turn was actually long-running.
-        elapsed = turn_elapsed()
-        if elapsed < BUSY_THRESHOLD_S:
+    else:  # Stop — only when a user-started turn was actually long-running.
+        # A subagent finishing is not "the task is done": SubagentStop (or any
+        # event carrying agent_id) stays silent even if someone wires it up.
+        if event == "SubagentStop" or data.get("agent_id"):
             return 0
-        # A missing turn-start marker yields inf; `int(inf // 60)` is int(nan)
-        # which raises. Treat "unknown duration" as 0 min (empty suffix).
-        mins = int(elapsed // 60) if elapsed != float("inf") else 0
+        elapsed = take_turn(session_id)
+        if elapsed is None or elapsed < BUSY_THRESHOLD_S:
+            return 0
+        mins = int(elapsed // 60)
         suffix = S["elapsed"].format(mins=mins) if mins >= 1 else ""
         notify(
             S["done"].format(cwd=cwd),
